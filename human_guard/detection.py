@@ -73,12 +73,21 @@ class YoloTfliteDetector:
             if person_score < confidence_threshold:
                 continue
 
-            x1 = int((cx - bw / 2) * orig_w)
-            y1 = int((cy - bh / 2) * orig_h)
-            x2 = int((cx + bw / 2) * orig_w)
-            y2 = int((cy + bh / 2) * orig_h)
+            if max(abs(cx), abs(cy), abs(bw), abs(bh)) <= 2.0:
+                scale_x = float(orig_w)
+                scale_y = float(orig_h)
+            else:
+                scale_x = orig_w / float(w_in)
+                scale_y = orig_h / float(h_in)
+
+            x1 = int((cx - bw / 2) * scale_x)
+            y1 = int((cy - bh / 2) * scale_y)
+            x2 = int((cx + bw / 2) * scale_x)
+            y2 = int((cy + bh / 2) * scale_y)
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(orig_w - 1, x2), min(orig_h - 1, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
             detections.append(Detection(box=(x1, y1, x2, y2), score=person_score))
 
         if len(detections) > 1:

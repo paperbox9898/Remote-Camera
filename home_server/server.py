@@ -1,15 +1,17 @@
 import csv
+import html
 import io
 import json
 import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 from PIL import Image
 
 from human_guard.detection import create_detector, point_in_polygon
@@ -28,14 +30,119 @@ detector = create_detector()
 app = FastAPI(title="Human Guard Server")
 
 
-def _check_api_key(x_api_key: Optional[str]) -> None:
-    if API_KEY and x_api_key != API_KEY:
+def _check_api_key(value: Optional[str]) -> None:
+    if API_KEY and value != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
+def _read_history(limit: int = 100) -> List[dict]:
+    if not HISTORY_CSV.exists():
+        return []
+    rows = []
+    with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if len(row) < 6 or row[0] == "time":
+                continue
+            rows.append(
+                {
+                    "time": row[0],
+                    "uid": row[1],
+                    "status": row[2],
+                    "count": row[3],
+                    "upload": row[4],
+                    "result": row[5],
+                }
+            )
+    return list(reversed(rows[-limit:]))
+
+
+def _file_url(path: str, key: Optional[str]) -> str:
+    suffix = f"?key={html.escape(key, quote=True)}" if key else ""
+    return f"/files/{html.escape(path, quote=True)}{suffix}"
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(key: Optional[str] = Query(default=None)):
+    _check_api_key(key)
+    rows = _read_history()
+    key_suffix = f"?key={html.escape(key, quote=True)}" if key else ""
+    body_rows = []
+    for row in rows:
+        status = row["status"]
+        status_class = "ng" if status == "NG" else "ok"
+        upload_link = f'<a href="{_file_url(row["upload"], key)}" target="_blank">upload</a>'
+        result_link = f'<a href="{_file_url(row["result"], key)}" target="_blank">result</a>'
+        body_rows.append(
+            "<tr>"
+            f"<td>{html.escape(row['time'])}</td>"
+            f"<td>{html.escape(row['uid'])}</td>"
+            f"<td><span class='{status_class}'>{html.escape(status)}</span></td>"
+            f"<td>{html.escape(row['count'])}</td>"
+            f"<td>{upload_link}</td>"
+            f"<td>{result_link}</td>"
+            "</tr>"
+        )
+    rows_html = "\n".join(body_rows) or "<tr><td colspan='6'>No inspections yet.</td></tr>"
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="10">
+  <title>Human Guard Dashboard</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; background: #f6f7f9; color: #1f2328; }}
+    header {{ display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 16px; }}
+    h1 {{ font-size: 24px; margin: 0; }}
+    a {{ color: #0969da; }}
+    table {{ width: 100%; border-collapse: collapse; background: white; }}
+    th, td {{ padding: 10px; border-bottom: 1px solid #d8dee4; text-align: left; }}
+    th {{ background: #eef1f4; }}
+    .ok {{ color: #1a7f37; font-weight: 700; }}
+    .ng {{ color: #cf222e; font-weight: 700; }}
+    .hint {{ color: #57606a; font-size: 14px; }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Human Guard Dashboard</h1>
+      <div class="hint">Auto-refresh every 10 seconds. Latest inspections first.</div>
+    </div>
+    <div><a href="/health{key_suffix}">health</a></div>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>UID</th>
+        <th>Status</th>
+        <th>Detections</th>
+        <th>Upload</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</body>
+</html>"""
+
+
+@app.get("/files/{file_path:path}")
+def serve_file(file_path: str, key: Optional[str] = Query(default=None)):
+    _check_api_key(key)
+    target = Path(file_path).resolve()
+    allowed_roots = [UPLOAD_DIR.resolve(), RESULT_DIR.resolve()]
+    if not any(target.is_relative_to(root) for root in allowed_roots):
+        raise HTTPException(status_code=404, detail="File not found")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(target)
+
+
 @app.get("/health")
-def health(x_api_key: Optional[str] = Header(default=None)):
-    _check_api_key(x_api_key)
+def health(x_api_key: Optional[str] = Header(default=None), key: Optional[str] = Query(default=None)):
+    _check_api_key(x_api_key or key)
     return {"ok": True, "detector": detector.name}
 
 

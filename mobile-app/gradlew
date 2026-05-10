@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Gradle start up script for UN*X
+# (gradle-wrapper.jar is required; generate it with: gradle wrapper --gradle-version 8.4)
+#
+
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$CLASSPATH" ]; then
+  echo "gradle-wrapper.jar not found."
+  echo "Run: gradle wrapper --gradle-version 8.4"
+  echo "Or use 'gradle' directly if Gradle is installed."
+  exit 1
+fi
+
+if [ -n "$JAVA_HOME" ]; then
+  JAVACMD="$JAVA_HOME/bin/java"
+else
+  JAVACMD="java"
+fi
+
+exec "$JAVACMD" \
+  "-Dorg.gradle.appname=${0##*/}" \
+  -classpath "$CLASSPATH" \
+  org.gradle.wrapper.GradleWrapperMain \
+  "$@"

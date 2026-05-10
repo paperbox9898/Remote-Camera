@@ -3,6 +3,7 @@ package com.remotecamera.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +14,7 @@ import android.os.VibratorManager
 import android.provider.MediaStore
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnCapture: Button
     private lateinit var tvResult: TextView
     private lateinit var tvDetail: TextView
+    private lateinit var ivResultImage: ImageView
 
     private var photoFile: File? = null
 
@@ -58,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         btnCapture = findViewById(R.id.btnCapture)
         tvResult = findViewById(R.id.tvResult)
         tvDetail = findViewById(R.id.tvDetail)
+        ivResultImage = findViewById(R.id.ivResultImage)
 
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         etServerUrl.setText(prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL))
@@ -124,6 +128,7 @@ class MainActivity : AppCompatActivity() {
             .apply()
 
         btnCapture.isEnabled = false
+        ivResultImage.setImageDrawable(null)
         showResult("분석 중...", android.R.color.darker_gray, "서버에 이미지를 업로드하고 있습니다.")
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -156,11 +161,15 @@ class MainActivity : AppCompatActivity() {
                             val status = json.optString("status", "UNKNOWN")
                             val detections = json.optJSONArray("detections")
                             val count = detections?.length() ?: 0
+                            val resultImage = json.optString("result_image", "")
                             if (alarm || status == "NG") {
                                 vibrateAlarm()
                                 showResult("불량/위험 감지", android.R.color.holo_red_dark, "감지 인원: ${count}명")
                             } else {
                                 showResult("정상", android.R.color.holo_green_dark, "감지 인원: ${count}명")
+                            }
+                            if (resultImage.isNotEmpty()) {
+                                loadResultImage(serverUrl, apiKey, resultImage)
                             }
                         }
                         response.code == 401 ->
@@ -173,6 +182,41 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     btnCapture.isEnabled = true
                     showResult("연결 실패", android.R.color.holo_orange_dark, e.message ?: "서버 URL과 Tailscale 연결을 확인하세요.")
+                }
+            }
+        }
+    }
+
+    private fun loadResultImage(serverUrl: String, apiKey: String, resultPath: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val encodedPath = resultPath
+                    .split("/")
+                    .joinToString("/") { Uri.encode(it) }
+                val urlBuilder = StringBuilder("$serverUrl/files/$encodedPath")
+                if (apiKey.isNotEmpty()) {
+                    urlBuilder.append("?key=").append(Uri.encode(apiKey))
+                }
+                val request = Request.Builder()
+                    .url(urlBuilder.toString())
+                    .build()
+                val response = client.newCall(request).execute()
+                val bytes = response.body?.bytes()
+                val bitmap = if (response.isSuccessful && bytes != null) {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } else {
+                    null
+                }
+                withContext(Dispatchers.Main) {
+                    if (bitmap != null) {
+                        ivResultImage.setImageBitmap(bitmap)
+                    } else {
+                        tvDetail.text = "${tvDetail.text}\n결과 이미지 로드 실패: ${response.code}"
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    tvDetail.text = "${tvDetail.text}\n결과 이미지 로드 실패: ${e.message}"
                 }
             }
         }

@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+server_uploads/
+server_results/
+alarms/
+*.csv
+.gradle/
+build/
+mobile-app/app/build/
+*.egg-info/
+dist/
+local.properties

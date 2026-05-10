@@ -4,8 +4,12 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.MediaStore
 import android.widget.Button
 import android.widget.EditText
@@ -36,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etApiKey: EditText
     private lateinit var btnCapture: Button
     private lateinit var tvResult: TextView
+    private lateinit var tvDetail: TextView
 
     private var photoFile: File? = null
 
@@ -52,6 +57,11 @@ class MainActivity : AppCompatActivity() {
         etApiKey = findViewById(R.id.etApiKey)
         btnCapture = findViewById(R.id.btnCapture)
         tvResult = findViewById(R.id.tvResult)
+        tvDetail = findViewById(R.id.tvDetail)
+
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        etServerUrl.setText(prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL))
+        etApiKey.setText(prefs.getString(KEY_API_KEY, ""))
 
         btnCapture.setOnClickListener {
             if (hasCameraPermission()) launchCamera() else requestCameraPermission()
@@ -107,9 +117,14 @@ class MainActivity : AppCompatActivity() {
             showResult("서버 URL을 입력하세요.", android.R.color.darker_gray)
             return
         }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_SERVER_URL, serverUrl)
+            .putString(KEY_API_KEY, apiKey)
+            .apply()
 
         btnCapture.isEnabled = false
-        showResult("분석 중...", android.R.color.darker_gray)
+        showResult("분석 중...", android.R.color.darker_gray, "서버에 이미지를 업로드하고 있습니다.")
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -139,34 +154,58 @@ class MainActivity : AppCompatActivity() {
                             val json = JSONObject(body)
                             val alarm = json.optBoolean("alarm", false)
                             val status = json.optString("status", "UNKNOWN")
+                            val detections = json.optJSONArray("detections")
+                            val count = detections?.length() ?: 0
                             if (alarm || status == "NG") {
-                                showResult("불량/위험 감지", android.R.color.holo_red_dark)
+                                vibrateAlarm()
+                                showResult("불량/위험 감지", android.R.color.holo_red_dark, "감지 인원: ${count}명")
                             } else {
-                                showResult("정상", android.R.color.holo_green_dark)
+                                showResult("정상", android.R.color.holo_green_dark, "감지 인원: ${count}명")
                             }
                         }
                         response.code == 401 ->
-                            showResult("인증 실패 (API Key 확인)", android.R.color.holo_orange_dark)
+                            showResult("인증 실패", android.R.color.holo_orange_dark, "API Key를 확인하세요.")
                         else ->
-                            showResult("서버 오류: ${response.code}", android.R.color.holo_orange_dark)
+                            showResult("서버 오류: ${response.code}", android.R.color.holo_orange_dark, body.take(160))
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     btnCapture.isEnabled = true
-                    showResult("연결 실패: ${e.message}", android.R.color.holo_orange_dark)
+                    showResult("연결 실패", android.R.color.holo_orange_dark, e.message ?: "서버 URL과 Tailscale 연결을 확인하세요.")
                 }
             }
         }
     }
 
-    private fun showResult(text: String, colorRes: Int) {
+    private fun showResult(text: String, colorRes: Int, detail: String = "") {
         tvResult.text = text
+        tvDetail.text = detail
         tvResult.setTextColor(ContextCompat.getColor(this, colorRes))
+    }
+
+    private fun vibrateAlarm() {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val manager = getSystemService(VibratorManager::class.java)
+            manager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250), -1))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(longArrayOf(0, 250, 120, 250), -1)
+        }
     }
 
     companion object {
         private const val REQ_PERMISSION = 1001
         private const val REQ_CAPTURE = 1002
+        private const val PREFS_NAME = "remote_camera_settings"
+        private const val KEY_SERVER_URL = "server_url"
+        private const val KEY_API_KEY = "api_key"
+        private const val DEFAULT_SERVER_URL = "http://100.127.232.50:8000"
     }
 }

@@ -43,52 +43,58 @@ python -m home_server.server
 
 ---
 
-## 2. Cloudflare Tunnel 실행 방법
+## 2. Tailscale 고정 연결
 
-외부(모바일 데이터 등)에서도 접속할 수 있도록 Cloudflare Tunnel을 사용합니다.
-포트포워딩 없이 HTTPS 주소를 자동 발급받습니다.
+임시 터널 주소가 계속 바뀌지 않도록 Tailscale 사용을 권장합니다.
 
-### cloudflared 설치
+### 설치 및 로그인
 
-```bash
-# Linux (x86_64)
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared && sudo mv cloudflared /usr/local/bin/
-
-# macOS
-brew install cloudflared
-
-# Windows
-winget install Cloudflare.cloudflared
-```
-
-### 터널 실행
-
-서버가 실행 중인 상태에서 별도 터미널로 실행합니다.
+1. 집컴에 Tailscale 설치 후 로그인
+2. 휴대폰에 Tailscale 설치 후 같은 계정으로 로그인
+3. 집컴 서버를 실행
 
 ```bash
-cloudflared tunnel --url http://localhost:8000
+export HUMAN_GUARD_API_KEY="사용자가_정한_긴_비밀번호"
+python -m home_server.server
 ```
 
-출력 예시:
+앱 기본 서버 URL은 아래 주소입니다.
 
-```
-Your quick Tunnel has been created! Visit it at:
- https://xxxx-xxxx-xxxx.trycloudflare.com
+```text
+http://100.127.232.50:8000
 ```
 
-이 주소를 앱의 서버 URL 칸에 입력합니다.
+휴대폰에서 Tailscale을 켠 상태로 앱을 실행하면 이 주소로 접속합니다.
+
+### Tailscale Serve 사용
+
+Windows/WSL 포트 경계 때문에 직접 접속이 막히면 Tailscale Serve를 활성화한 뒤 실행합니다.
+
+```powershell
+tailscale serve --bg 8000
+```
+
+Serve가 활성화되지 않았다면 Tailscale이 출력하는 승인 링크를 브라우저에서 열어 승인합니다.
+
+---
+
+## 2-1. 임시 터널 대안
+
+Tailscale을 쓸 수 없는 경우 Cloudflare Tunnel 또는 localhost.run을 임시로 사용할 수 있습니다. 단, 무료 임시 터널은 주소가 바뀔 수 있습니다.
 
 ---
 
 ## 3. 앱에 서버 URL / API Key 입력하는 방법
 
 1. APK를 설치하고 앱을 실행합니다.
-2. **서버 URL** 칸에 Cloudflare Tunnel 주소를 입력합니다.
-   - 예: `https://xxxx-xxxx-xxxx.trycloudflare.com`
+2. **서버 URL** 칸을 확인합니다.
+   - Tailscale 기본값: `http://100.127.232.50:8000`
+   - 임시 터널 사용 시: `https://xxxx.example.com`
 3. **API Key** 칸에 `HUMAN_GUARD_API_KEY`로 설정한 비밀번호를 입력합니다.
    - 로컬 테스트(API Key 미설정)인 경우 비워둡니다.
 4. **사진 촬영 후 판정** 버튼을 누릅니다.
+
+앱은 서버 URL과 API Key를 기기에 저장하므로 다음 실행 때 다시 입력하지 않아도 됩니다.
 
 ---
 

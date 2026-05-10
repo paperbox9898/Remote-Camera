@@ -206,6 +206,6 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS_NAME = "remote_camera_settings"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_API_KEY = "api_key"
-        private const val DEFAULT_SERVER_URL = "http://100.127.232.50:8000"
+        private const val DEFAULT_SERVER_URL = "https://chamin.taile54870.ts.net"
     }
 }

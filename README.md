@@ -61,7 +61,7 @@ python -m home_server.server
 앱 기본 서버 URL은 아래 주소입니다.
 
 ```text
-http://100.127.232.50:8000
+https://chamin.taile54870.ts.net
 ```
 
 휴대폰에서 Tailscale을 켠 상태로 앱을 실행하면 이 주소로 접속합니다.
@@ -88,7 +88,7 @@ Tailscale을 쓸 수 없는 경우 Cloudflare Tunnel 또는 localhost.run을 임
 
 1. APK를 설치하고 앱을 실행합니다.
 2. **서버 URL** 칸을 확인합니다.
-   - Tailscale 기본값: `http://100.127.232.50:8000`
+   - Tailscale 기본값: `https://chamin.taile54870.ts.net`
    - 임시 터널 사용 시: `https://xxxx.example.com`
 3. **API Key** 칸에 `HUMAN_GUARD_API_KEY`로 설정한 비밀번호를 입력합니다.
    - 로컬 테스트(API Key 미설정)인 경우 비워둡니다.

@@ -42,6 +42,9 @@ def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str]
     if polygon:
         try:
             poly = json.loads(polygon)
+            if poly and max(abs(float(point[0])) for point in poly) <= 1.0 and max(abs(float(point[1])) for point in poly) <= 1.0:
+                height, width = img_np.shape[:2]
+                poly = [[float(point[0]) * width, float(point[1]) * height] for point in poly]
         except Exception:
             poly = None
 

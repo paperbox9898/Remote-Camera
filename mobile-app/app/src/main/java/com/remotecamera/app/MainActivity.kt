@@ -4,9 +4,13 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.YuvImage
 import android.net.Uri
 import android.os.Build
@@ -16,6 +20,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.MediaStore
+import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -43,6 +50,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString.Companion.toByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -59,7 +67,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etApiKey: EditText
     private lateinit var btnCapture: Button
     private lateinit var btnLive: Button
+    private lateinit var btnClearArea: Button
     private lateinit var previewView: PreviewView
+    private lateinit var overlayView: DetectionOverlayView
     private lateinit var tvResult: TextView
     private lateinit var tvDetail: TextView
     private lateinit var ivResultImage: ImageView
@@ -87,7 +97,9 @@ class MainActivity : AppCompatActivity() {
         etApiKey = findViewById(R.id.etApiKey)
         btnCapture = findViewById(R.id.btnCapture)
         btnLive = findViewById(R.id.btnLive)
+        btnClearArea = findViewById(R.id.btnClearArea)
         previewView = findViewById(R.id.previewView)
+        overlayView = findViewById(R.id.overlayView)
         tvResult = findViewById(R.id.tvResult)
         tvDetail = findViewById(R.id.tvDetail)
         ivResultImage = findViewById(R.id.ivResultImage)
@@ -108,6 +120,27 @@ class MainActivity : AppCompatActivity() {
                 startLiveMode()
             } else {
                 requestCameraPermission(startLiveAfterGrant = true)
+            }
+        }
+
+        btnClearArea.setOnClickListener {
+            overlayView.clearArea()
+            tvDetail.text = "감시 영역을 초기화했습니다."
+            if (liveMode) {
+                stopLiveMode()
+                startLiveMode()
+            }
+        }
+
+        overlayView.onAreaChanged = {
+            tvDetail.text = if (overlayView.areaPointCount >= 3) {
+                "감시 영역: ${overlayView.areaPointCount}개 점"
+            } else {
+                "감시 영역 점을 ${3 - overlayView.areaPointCount}개 더 찍으세요."
+            }
+            if (liveMode) {
+                stopLiveMode()
+                startLiveMode()
             }
         }
     }
@@ -171,6 +204,7 @@ class MainActivity : AppCompatActivity() {
         liveMode = true
         awaitingStreamResponse = false
         liveFrameCount = 0
+        overlayView.setDetections(emptyList(), 0, 0)
         btnLive.text = "실시간 감시 중지"
         btnCapture.isEnabled = false
         ivResultImage.setImageDrawable(null)
@@ -239,7 +273,13 @@ class MainActivity : AppCompatActivity() {
                     }
                     val alarm = json.optBoolean("alarm", false)
                     val status = json.optString("status", "UNKNOWN")
-                    val count = json.optJSONArray("detections")?.length() ?: 0
+                    val detections = json.optJSONArray("detections")
+                    val count = detections?.length() ?: 0
+                    overlayView.setDetections(
+                        parseDetectionBoxes(json),
+                        json.optInt("frame_width", 0),
+                        json.optInt("frame_height", 0),
+                    )
                     liveFrameCount += 1
                     if (alarm || status == "NG") {
                         vibrateAlarm()
@@ -469,7 +509,39 @@ class MainActivity : AppCompatActivity() {
         }
         val separator = if (wsBase.contains("?")) "&" else "?"
         val keyQuery = if (apiKey.isNotEmpty()) "${separator}key=${Uri.encode(apiKey)}" else ""
-        return "$wsBase/stream$keyQuery"
+        val area = overlayView.normalizedAreaJson()
+        val areaQuery = if (area != null) {
+            val prefix = if (keyQuery.isNotEmpty()) "&" else separator
+            "${prefix}polygon=${Uri.encode(area)}"
+        } else {
+            ""
+        }
+        return "$wsBase/stream$keyQuery$areaQuery"
+    }
+
+    private fun parseDetectionBoxes(json: JSONObject): List<DetectionBox> {
+        val frameWidth = json.optInt("frame_width", 0)
+        val frameHeight = json.optInt("frame_height", 0)
+        val detections = json.optJSONArray("detections") ?: return emptyList()
+        val boxes = mutableListOf<DetectionBox>()
+        for (i in 0 until detections.length()) {
+            val det = detections.optJSONObject(i) ?: continue
+            val box = det.optJSONArray("box") ?: continue
+            if (box.length() < 4) continue
+            boxes.add(
+                DetectionBox(
+                    x1 = box.optDouble(0).toFloat(),
+                    y1 = box.optDouble(1).toFloat(),
+                    x2 = box.optDouble(2).toFloat(),
+                    y2 = box.optDouble(3).toFloat(),
+                    score = det.optDouble("score").toFloat(),
+                    inArea = det.optBoolean("in_area"),
+                    frameWidth = frameWidth,
+                    frameHeight = frameHeight,
+                )
+            )
+        }
+        return boxes
     }
 
     private fun showResult(text: String, colorRes: Int, detail: String = "") {
@@ -503,5 +575,146 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_SERVER_URL = "https://chamin.taile54870.ts.net"
         private const val LIVE_FRAME_INTERVAL_MS = 500L
         private const val LIVE_JPEG_QUALITY = 65
+    }
+}
+
+data class DetectionBox(
+    val x1: Float,
+    val y1: Float,
+    val x2: Float,
+    val y2: Float,
+    val score: Float,
+    val inArea: Boolean,
+    val frameWidth: Int,
+    val frameHeight: Int,
+)
+
+class DetectionOverlayView @JvmOverloads constructor(
+    context: android.content.Context,
+    attrs: AttributeSet? = null,
+) : View(context, attrs) {
+
+    var onAreaChanged: (() -> Unit)? = null
+    val areaPointCount: Int
+        get() = areaPoints.size
+
+    private val boxes = mutableListOf<DetectionBox>()
+    private val areaPoints = mutableListOf<Pair<Float, Float>>()
+    private var frameWidth = 0
+    private var frameHeight = 0
+
+    private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+    }
+    private val labelBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 40f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+    private val areaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 193, 7)
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+    }
+    private val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 193, 7)
+        style = Paint.Style.FILL
+    }
+
+    init {
+        setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_UP && width > 0 && height > 0) {
+                areaPoints.add(event.x / width.toFloat() to event.y / height.toFloat())
+                invalidate()
+                onAreaChanged?.invoke()
+                true
+            } else {
+                true
+            }
+        }
+    }
+
+    fun setDetections(newBoxes: List<DetectionBox>, newFrameWidth: Int, newFrameHeight: Int) {
+        boxes.clear()
+        boxes.addAll(newBoxes)
+        frameWidth = newFrameWidth
+        frameHeight = newFrameHeight
+        invalidate()
+    }
+
+    fun clearArea() {
+        areaPoints.clear()
+        invalidate()
+    }
+
+    fun normalizedAreaJson(): String? {
+        if (areaPoints.size < 3) return null
+        val json = JSONArray()
+        areaPoints.forEach { point ->
+            json.put(JSONArray().put(point.first.toDouble()).put(point.second.toDouble()))
+        }
+        return json.toString()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        drawArea(canvas)
+        drawBoxes(canvas)
+    }
+
+    private fun drawArea(canvas: Canvas) {
+        if (areaPoints.isEmpty()) return
+        val path = android.graphics.Path()
+        areaPoints.forEachIndexed { index, point ->
+            val x = point.first * width
+            val y = point.second * height
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            canvas.drawCircle(x, y, 9f, pointPaint)
+        }
+        if (areaPoints.size >= 3) path.close()
+        canvas.drawPath(path, areaPaint)
+    }
+
+    private fun drawBoxes(canvas: Canvas) {
+        if (frameWidth <= 0 || frameHeight <= 0) return
+        val frame = contentRect()
+        boxes.forEach { box ->
+            val color = if (box.inArea) Color.RED else Color.rgb(0, 200, 0)
+            boxPaint.color = color
+            labelBgPaint.color = color
+            val left = frame.left + box.x1 / frameWidth * frame.width()
+            val top = frame.top + box.y1 / frameHeight * frame.height()
+            val right = frame.left + box.x2 / frameWidth * frame.width()
+            val bottom = frame.top + box.y2 / frameHeight * frame.height()
+            canvas.drawRect(left, top, right, bottom, boxPaint)
+
+            val label = "%.2f".format(Locale.US, box.score)
+            val textWidth = labelPaint.measureText(label)
+            val labelHeight = 48f
+            val labelTop = top.coerceAtLeast(frame.top)
+            canvas.drawRect(left, labelTop, left + textWidth + 22f, labelTop + labelHeight, labelBgPaint)
+            canvas.drawText(label, left + 10f, labelTop + 36f, labelPaint)
+        }
+    }
+
+    private fun contentRect(): RectF {
+        if (frameWidth <= 0 || frameHeight <= 0 || width <= 0 || height <= 0) {
+            return RectF(0f, 0f, width.toFloat(), height.toFloat())
+        }
+        val viewRatio = width.toFloat() / height.toFloat()
+        val frameRatio = frameWidth.toFloat() / frameHeight.toFloat()
+        return if (frameRatio > viewRatio) {
+            val contentHeight = width / frameRatio
+            val top = (height - contentHeight) / 2f
+            RectF(0f, top, width.toFloat(), top + contentHeight)
+        } else {
+            val contentWidth = height * frameRatio
+            val left = (width - contentWidth) / 2f
+            RectF(left, 0f, left + contentWidth, height.toFloat())
+        }
     }
 }

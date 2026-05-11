@@ -37,16 +37,82 @@ def _check_api_key(value: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
+def _parse_polygon(polygon: Optional[str], img_np: np.ndarray) -> Optional[List[List[float]]]:
+    if not polygon:
+        return None
+
+    try:
+        poly = json.loads(polygon)
+        if not poly:
+            return None
+        if max(abs(float(point[0])) for point in poly) <= 1.0 and max(abs(float(point[1])) for point in poly) <= 1.0:
+            height, width = img_np.shape[:2]
+            return [[float(point[0]) * width, float(point[1]) * height] for point in poly]
+        return [[float(point[0]), float(point[1])] for point in poly]
+    except Exception:
+        return None
+
+
+def _point_in_rect(point: List[float], rect: tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = rect
+    return x1 <= point[0] <= x2 and y1 <= point[1] <= y2
+
+
+def _segments_intersect(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> bool:
+    def orientation(p, q, r):
+        value = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+        if abs(value) < 1e-9:
+            return 0
+        return 1 if value > 0 else 2
+
+    def on_segment(p, q, r):
+        return (
+            min(p[0], r[0]) <= q[0] <= max(p[0], r[0])
+            and min(p[1], r[1]) <= q[1] <= max(p[1], r[1])
+        )
+
+    o1 = orientation(a, b, c)
+    o2 = orientation(a, b, d)
+    o3 = orientation(c, d, a)
+    o4 = orientation(c, d, b)
+
+    if o1 != o2 and o3 != o4:
+        return True
+    if o1 == 0 and on_segment(a, c, b):
+        return True
+    if o2 == 0 and on_segment(a, d, b):
+        return True
+    if o3 == 0 and on_segment(c, a, d):
+        return True
+    if o4 == 0 and on_segment(c, b, d):
+        return True
+    return False
+
+
+def _box_intersects_polygon(box: tuple[int, int, int, int], poly: List[List[float]]) -> bool:
+    x1, y1, x2, y2 = box
+    box_corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+    box_edges = list(zip(box_corners, box_corners[1:] + box_corners[:1]))
+    polygon_edges = list(zip(poly, poly[1:] + poly[:1]))
+
+    if any(point_in_polygon(corner, poly) for corner in box_corners):
+        return True
+    if any(_point_in_rect(point, box) for point in poly):
+        return True
+    for box_edge in box_edges:
+        for poly_edge in polygon_edges:
+            if _segments_intersect(box_edge[0], box_edge[1], tuple(poly_edge[0]), tuple(poly_edge[1])):
+                return True
+    return False
+
+
 def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str] = None) -> dict:
-    poly = None
-    if polygon:
-        try:
-            poly = json.loads(polygon)
-            if poly and max(abs(float(point[0])) for point in poly) <= 1.0 and max(abs(float(point[1])) for point in poly) <= 1.0:
-                height, width = img_np.shape[:2]
-                poly = [[float(point[0]) * width, float(point[1]) * height] for point in poly]
-        except Exception:
-            poly = None
+    poly = _parse_polygon(polygon, img_np)
 
     detections = detector.detect(img_np, confidence_threshold=confidence)
     det_list = []
@@ -60,7 +126,7 @@ def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str]
         foot_point = [foot_x, foot_y]
 
         if poly:
-            in_area = point_in_polygon(foot_point, poly)
+            in_area = _box_intersects_polygon((x1, y1, x2, y2), poly)
             alarm = alarm or in_area
         else:
             in_area = True
@@ -123,11 +189,10 @@ def _draw_result(img_np: np.ndarray, detections: List[dict], polygon: Optional[s
         )
 
     if polygon:
-        try:
-            pts = np.array(json.loads(polygon), dtype=np.int32)
+        poly = _parse_polygon(polygon, img_np)
+        if poly:
+            pts = np.array(poly, dtype=np.int32)
             cv2.polylines(result_img, [pts], isClosed=True, color=(255, 165, 0), thickness=2)
-        except Exception:
-            pass
 
     return result_img
 

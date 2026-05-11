@@ -205,7 +205,7 @@ class MainActivity : AppCompatActivity() {
         awaitingStreamResponse = false
         liveFrameCount = 0
         overlayView.setDetections(emptyList(), 0, 0)
-        btnLive.text = "실시간 감시 중지"
+        btnLive.text = "실시간 중지"
         btnCapture.isEnabled = false
         ivResultImage.setImageDrawable(null)
         showResult("실시간 연결 중...", android.R.color.darker_gray, "카메라 프리뷰를 준비하고 있습니다.")
@@ -218,7 +218,7 @@ class MainActivity : AppCompatActivity() {
         awaitingStreamResponse = false
         webSocket?.close(1000, "live stopped")
         webSocket = null
-        btnLive.text = "실시간 감시 시작"
+        btnLive.text = "실시간 시작"
         btnCapture.isEnabled = true
         try {
             ProcessCameraProvider.getInstance(this).get().unbindAll()
@@ -624,6 +624,16 @@ class DetectionOverlayView @JvmOverloads constructor(
         color = Color.rgb(255, 193, 7)
         style = Paint.Style.FILL
     }
+    private val hintBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(170, 17, 24, 39)
+        style = Paint.Style.FILL
+    }
+    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 34f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
+    }
 
     init {
         setOnTouchListener { _, event ->
@@ -664,6 +674,7 @@ class DetectionOverlayView @JvmOverloads constructor(
         super.onDraw(canvas)
         drawArea(canvas)
         drawBoxes(canvas)
+        drawHint(canvas)
     }
 
     private fun drawArea(canvas: Canvas) {
@@ -699,6 +710,24 @@ class DetectionOverlayView @JvmOverloads constructor(
             canvas.drawRect(left, labelTop, left + textWidth + 22f, labelTop + labelHeight, labelBgPaint)
             canvas.drawText(label, left + 10f, labelTop + 36f, labelPaint)
         }
+    }
+
+    private fun drawHint(canvas: Canvas) {
+        if (areaPoints.isNotEmpty() || boxes.isNotEmpty()) return
+        val text = "화면을 터치해 감시 영역 지정"
+        val centerX = width / 2f
+        val centerY = height - 58f
+        val textWidth = hintPaint.measureText(text)
+        canvas.drawRoundRect(
+            centerX - textWidth / 2f - 22f,
+            centerY - 42f,
+            centerX + textWidth / 2f + 22f,
+            centerY + 16f,
+            8f,
+            8f,
+            hintBgPaint,
+        )
+        canvas.drawText(text, centerX, centerY, hintPaint)
     }
 
     private fun contentRect(): RectF {

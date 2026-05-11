@@ -1,4 +1,5 @@
 import csv
+import base64
 import html
 import io
 import json
@@ -11,6 +12,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from PIL import Image
 
@@ -33,6 +35,98 @@ app = FastAPI(title="Human Guard Server")
 def _check_api_key(value: Optional[str]) -> None:
     if API_KEY and value != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
+
+
+def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str] = None) -> dict:
+    poly = None
+    if polygon:
+        try:
+            poly = json.loads(polygon)
+        except Exception:
+            poly = None
+
+    detections = detector.detect(img_np, confidence_threshold=confidence)
+    det_list = []
+    alarm = False
+
+    for det in detections:
+        x1, y1, x2, y2 = det.box
+        score = det.score
+        foot_x = (x1 + x2) // 2
+        foot_y = y2
+        foot_point = [foot_x, foot_y]
+
+        if poly:
+            in_area = point_in_polygon(foot_point, poly)
+            alarm = alarm or in_area
+        else:
+            in_area = True
+            alarm = True
+
+        det_list.append({
+            "box": [x1, y1, x2, y2],
+            "score": round(float(score), 4),
+            "foot_point": foot_point,
+            "in_area": in_area,
+        })
+
+    return {
+        "status": "NG" if alarm else "OK",
+        "alarm": alarm,
+        "detector": detector.name,
+        "detections": det_list,
+    }
+
+
+def _draw_result(img_np: np.ndarray, detections: List[dict], polygon: Optional[str] = None) -> np.ndarray:
+    result_img = img_np.copy()
+
+    for det in detections:
+        x1, y1, x2, y2 = det["box"]
+        score = det["score"]
+        foot_x, foot_y = det["foot_point"]
+        in_area = det["in_area"]
+
+        # RGB colors: red for alarm, green for safe
+        color = (255, 0, 0) if in_area else (0, 255, 0)
+        cv2.rectangle(result_img, (x1, y1), (x2, y2), color, 2)
+        cv2.circle(result_img, (foot_x, foot_y), 5, color, -1)
+        label = f"{score:.2f}"
+        font_scale = 1.1
+        thickness = 3
+        (label_w, label_h), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+        )
+        label_x = x1 + 6
+        label_y = min(max(y1 + label_h + 10, label_h + 10), max(label_h + 10, y2 - 8))
+        cv2.rectangle(
+            result_img,
+            (x1, max(0, label_y - label_h - baseline - 8)),
+            (
+                min(result_img.shape[1] - 1, x1 + label_w + 14),
+                min(result_img.shape[0] - 1, label_y + baseline + 4),
+            ),
+            color,
+            -1,
+        )
+        cv2.putText(
+            result_img,
+            label,
+            (label_x, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+        )
+
+    if polygon:
+        try:
+            pts = np.array(json.loads(polygon), dtype=np.int32)
+            cv2.polylines(result_img, [pts], isClosed=True, color=(255, 165, 0), thickness=2)
+        except Exception:
+            pass
+
+    return result_img
 
 
 def _read_history(limit: int = 100) -> List[dict]:
@@ -146,6 +240,42 @@ def health(x_api_key: Optional[str] = Header(default=None), key: Optional[str] =
     return {"ok": True, "detector": detector.name}
 
 
+@app.websocket("/stream")
+async def stream(
+    websocket: WebSocket,
+    key: Optional[str] = Query(default=None),
+    confidence: float = Query(default=0.35),
+    polygon: Optional[str] = Query(default=None),
+    overlay: bool = Query(default=False),
+):
+    if API_KEY and key != API_KEY:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    try:
+        while True:
+            img_bytes = await websocket.receive_bytes()
+            pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            img_np = np.array(pil_img)
+            result = _inspect_array(img_np, confidence=confidence, polygon=polygon)
+            result["frame_width"] = int(img_np.shape[1])
+            result["frame_height"] = int(img_np.shape[0])
+
+            if overlay:
+                result_img = _draw_result(img_np, result["detections"], polygon=polygon)
+                buffer = io.BytesIO()
+                Image.fromarray(result_img).save(buffer, "JPEG", quality=75)
+                result["overlay_jpeg_base64"] = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+            await websocket.send_text(json.dumps(result, ensure_ascii=False))
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        await websocket.send_text(json.dumps({"error": str(exc)}, ensure_ascii=False))
+        await websocket.close(code=1011)
+
+
 @app.post("/inspect")
 async def inspect(
     image: UploadFile = File(...),
@@ -165,93 +295,20 @@ async def inspect(
     upload_path = UPLOAD_DIR / f"upload_{ts}_{uid}.jpg"
     pil_img.save(str(upload_path), "JPEG")
 
-    poly = None
-    if polygon:
-        try:
-            poly = json.loads(polygon)
-        except Exception:
-            poly = None
-
-    detections = detector.detect(img_np, confidence_threshold=confidence)
-
-    result_img = img_np.copy()
-    det_list = []
-    alarm = False
-
-    for det in detections:
-        x1, y1, x2, y2 = det.box
-        score = det.score
-        foot_x = (x1 + x2) // 2
-        foot_y = y2
-        foot_point = [foot_x, foot_y]
-
-        in_area = False
-        if poly:
-            in_area = point_in_polygon(foot_point, poly)
-            if in_area:
-                alarm = True
-        else:
-            alarm = True
-            in_area = True
-
-        # RGB colors: red for alarm, green for safe
-        color = (255, 0, 0) if in_area else (0, 255, 0)
-        cv2.rectangle(result_img, (x1, y1), (x2, y2), color, 2)
-        cv2.circle(result_img, (foot_x, foot_y), 5, color, -1)
-        label = f"{score:.2f}"
-        font_scale = 1.1
-        thickness = 3
-        (label_w, label_h), baseline = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
-        )
-        label_x = x1 + 6
-        label_y = min(max(y1 + label_h + 10, label_h + 10), max(label_h + 10, y2 - 8))
-        cv2.rectangle(
-            result_img,
-            (x1, max(0, label_y - label_h - baseline - 8)),
-            (
-                min(result_img.shape[1] - 1, x1 + label_w + 14),
-                min(result_img.shape[0] - 1, label_y + baseline + 4),
-            ),
-            color,
-            -1,
-        )
-        cv2.putText(
-            result_img,
-            label,
-            (label_x, label_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            (255, 255, 255),
-            thickness,
-        )
-
-        det_list.append({
-            "box": [x1, y1, x2, y2],
-            "score": round(float(score), 4),
-            "foot_point": foot_point,
-            "in_area": in_area,
-        })
-
-    if poly:
-        pts = np.array(poly, dtype=np.int32)
-        cv2.polylines(result_img, [pts], isClosed=True, color=(255, 165, 0), thickness=2)
+    result = _inspect_array(img_np, confidence=confidence, polygon=polygon)
+    det_list = result["detections"]
+    result_img = _draw_result(img_np, det_list, polygon=polygon)
 
     result_path = RESULT_DIR / f"result_{ts}_{uid}.jpg"
     Image.fromarray(result_img).save(str(result_path), "JPEG")
 
-    status = "NG" if alarm else "OK"
+    status = result["status"]
 
     with open(HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([ts, uid, status, len(det_list), str(upload_path), str(result_path)])
 
-    return {
-        "status": status,
-        "alarm": alarm,
-        "detector": detector.name,
-        "detections": det_list,
-        "result_image": str(result_path),
-    }
+    result["result_image"] = str(result_path)
+    return result
 
 
 if __name__ == "__main__":

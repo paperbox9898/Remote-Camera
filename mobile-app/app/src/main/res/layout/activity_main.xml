@@ -55,7 +55,22 @@
             android:layout_height="wrap_content"
             android:text="사진 촬영 후 판정"
             android:textSize="16sp"
-            android:layout_marginBottom="32dp" />
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnLive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="실시간 감시 시작"
+            android:textSize="16sp"
+            android:layout_marginBottom="16dp" />
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="320dp"
+            android:layout_marginBottom="16dp"
+            android:background="#111111" />
 
         <TextView
             android:id="@+id/tvResult"

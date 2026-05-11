@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 DEFAULT_MODEL_PATH = Path("yolo_model/yolov8n_float32.tflite")
+DEFAULT_ULTRALYTICS_MODEL_PATH = Path("yolo_model/yolo11s.pt")
 
 
 @dataclasses.dataclass
@@ -104,6 +105,39 @@ class YoloTfliteDetector:
         return detections
 
 
+class UltralyticsDetector:
+    def __init__(self, model_path: Path) -> None:
+        import torch
+        from ultralytics import YOLO
+
+        self._device = 0 if torch.cuda.is_available() else "cpu"
+        self._model = YOLO(str(model_path))
+        self.name = f"{model_path.stem}-ultralytics-{'cuda' if self._device != 'cpu' else 'cpu'}"
+
+    def detect(self, image_rgb: np.ndarray, confidence_threshold: float = 0.35) -> List[Detection]:
+        results = self._model.predict(
+            source=image_rgb,
+            conf=confidence_threshold,
+            classes=[0],
+            device=self._device,
+            verbose=False,
+        )
+        detections: List[Detection] = []
+        if not results:
+            return detections
+
+        boxes = results[0].boxes
+        if boxes is None:
+            return detections
+
+        for box in boxes:
+            xyxy = box.xyxy[0].detach().cpu().numpy()
+            score = float(box.conf[0].detach().cpu().item())
+            x1, y1, x2, y2 = [int(v) for v in xyxy]
+            detections.append(Detection(box=(x1, y1, x2, y2), score=score))
+        return detections
+
+
 class HogFallbackDetector:
     name = "hog-fallback"
 
@@ -131,7 +165,14 @@ class HogFallbackDetector:
 
 def create_detector(
     model_path: Optional[Path] = None,
-) -> "YoloTfliteDetector | HogFallbackDetector":
+) -> "UltralyticsDetector | YoloTfliteDetector | HogFallbackDetector":
+    ultralytics_path = DEFAULT_ULTRALYTICS_MODEL_PATH
+    if ultralytics_path.exists():
+        try:
+            return UltralyticsDetector(ultralytics_path)
+        except Exception as exc:
+            print(f"[HumanGuard] Ultralytics load failed ({exc}), trying TFLite.")
+
     path = model_path or DEFAULT_MODEL_PATH
     try:
         return YoloTfliteDetector(path)

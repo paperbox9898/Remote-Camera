@@ -198,9 +198,32 @@ async def inspect(
         color = (255, 0, 0) if in_area else (0, 255, 0)
         cv2.rectangle(result_img, (x1, y1), (x2, y2), color, 2)
         cv2.circle(result_img, (foot_x, foot_y), 5, color, -1)
+        label = f"{score:.2f}"
+        font_scale = 1.1
+        thickness = 3
+        (label_w, label_h), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+        )
+        label_x = x1 + 6
+        label_y = min(max(y1 + label_h + 10, label_h + 10), max(label_h + 10, y2 - 8))
+        cv2.rectangle(
+            result_img,
+            (x1, max(0, label_y - label_h - baseline - 8)),
+            (
+                min(result_img.shape[1] - 1, x1 + label_w + 14),
+                min(result_img.shape[0] - 1, label_y + baseline + 4),
+            ),
+            color,
+            -1,
+        )
         cv2.putText(
-            result_img, f"{score:.2f}", (x1, max(y1 - 5, 0)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
+            result_img,
+            label,
+            (label_x, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (255, 255, 255),
+            thickness,
         )
 
         det_list.append({

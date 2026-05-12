@@ -81,7 +81,9 @@ class MainActivity : AppCompatActivity() {
     private var pendingLiveStart = false
     private var awaitingStreamResponse = false
     private var lastFrameSentAt = 0L
-    private var liveFrameCount = 0
+    private var lastFpsUpdatedAt = 0L
+    private var framesSinceFpsUpdate = 0
+    private var liveFps = 0
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -203,7 +205,9 @@ class MainActivity : AppCompatActivity() {
         saveSettings(serverUrl, etApiKey.text.toString())
         liveMode = true
         awaitingStreamResponse = false
-        liveFrameCount = 0
+        lastFpsUpdatedAt = 0L
+        framesSinceFpsUpdate = 0
+        liveFps = 0
         overlayView.setDetections(emptyList(), 0, 0)
         btnLive.text = "실시간 중지"
         btnCapture.isEnabled = false
@@ -280,19 +284,19 @@ class MainActivity : AppCompatActivity() {
                         json.optInt("frame_width", 0),
                         json.optInt("frame_height", 0),
                     )
-                    liveFrameCount += 1
+                    updateLiveFps()
                     if (alarm || status == "NG") {
                         vibrateAlarm()
                         showResult(
                             "불량/위험 감지",
                             android.R.color.holo_red_dark,
-                            "실시간 프레임: ${liveFrameCount} / 감지 인원: ${count}명",
+                            "실시간 FPS: ${liveFps} / 감지 인원: ${count}명",
                         )
                     } else {
                         showResult(
                             "정상",
                             android.R.color.holo_green_dark,
-                            "실시간 프레임: ${liveFrameCount} / 감지 인원: ${count}명",
+                            "실시간 FPS: ${liveFps} / 감지 인원: ${count}명",
                         )
                     }
                 }
@@ -326,6 +330,23 @@ class MainActivity : AppCompatActivity() {
             awaitingStreamResponse = false
         } finally {
             imageProxy.close()
+        }
+    }
+
+    private fun updateLiveFps() {
+        val now = System.currentTimeMillis()
+        if (lastFpsUpdatedAt == 0L) {
+            lastFpsUpdatedAt = now
+            liveFps = 0
+            return
+        }
+
+        framesSinceFpsUpdate += 1
+        val elapsedMs = now - lastFpsUpdatedAt
+        if (elapsedMs >= FPS_UPDATE_INTERVAL_MS) {
+            liveFps = ((framesSinceFpsUpdate * 1000f) / elapsedMs).toInt()
+            framesSinceFpsUpdate = 0
+            lastFpsUpdatedAt = now
         }
     }
 
@@ -509,14 +530,19 @@ class MainActivity : AppCompatActivity() {
         }
         val separator = if (wsBase.contains("?")) "&" else "?"
         val keyQuery = if (apiKey.isNotEmpty()) "${separator}key=${Uri.encode(apiKey)}" else ""
+        val confidenceQuery = if (keyQuery.isNotEmpty()) {
+            "&confidence=$LIVE_CONFIDENCE"
+        } else {
+            "${separator}confidence=$LIVE_CONFIDENCE"
+        }
         val area = overlayView.normalizedAreaJson()
         val areaQuery = if (area != null) {
-            val prefix = if (keyQuery.isNotEmpty()) "&" else separator
+            val prefix = "&"
             "${prefix}polygon=${Uri.encode(area)}"
         } else {
             ""
         }
-        return "$wsBase/stream$keyQuery$areaQuery"
+        return "$wsBase/stream$keyQuery$confidenceQuery$areaQuery"
     }
 
     private fun parseDetectionBoxes(json: JSONObject): List<DetectionBox> {
@@ -575,6 +601,8 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_SERVER_URL = "https://chamin.taile54870.ts.net"
         private const val LIVE_FRAME_INTERVAL_MS = 500L
         private const val LIVE_JPEG_QUALITY = 65
+        private const val LIVE_CONFIDENCE = 0.6
+        private const val FPS_UPDATE_INTERVAL_MS = 1000L
     }
 }
 

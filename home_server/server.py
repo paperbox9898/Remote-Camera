@@ -112,6 +112,7 @@ def _box_intersects_polygon(box: tuple[int, int, int, int], poly: List[List[floa
 
 
 def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str] = None) -> dict:
+    confidence = max(confidence, 0.6)
     poly = _parse_polygon(polygon, img_np)
 
     detections = detector.detect(img_np, confidence_threshold=confidence)
@@ -126,7 +127,7 @@ def _inspect_array(img_np: np.ndarray, confidence: float, polygon: Optional[str]
         foot_point = [foot_x, foot_y]
 
         if poly:
-            in_area = _box_intersects_polygon((x1, y1, x2, y2), poly)
+            in_area = point_in_polygon(foot_point, poly)
             alarm = alarm or in_area
         else:
             in_area = True
@@ -312,7 +313,7 @@ def health(x_api_key: Optional[str] = Header(default=None), key: Optional[str] =
 async def stream(
     websocket: WebSocket,
     key: Optional[str] = Query(default=None),
-    confidence: float = Query(default=0.35),
+    confidence: float = Query(default=0.6),
     polygon: Optional[str] = Query(default=None),
     overlay: bool = Query(default=False),
 ):
@@ -347,7 +348,7 @@ async def stream(
 @app.post("/inspect")
 async def inspect(
     image: UploadFile = File(...),
-    confidence: float = Form(default=0.35),
+    confidence: float = Form(default=0.6),
     polygon: Optional[str] = Form(default=None),
     x_api_key: Optional[str] = Header(default=None),
 ):

@@ -17,6 +17,8 @@ remote-camera/
 
 ## 1. 집컴 서버 실행 방법
 
+자세한 실행 절차는 [SERVER_RUN.md](SERVER_RUN.md)를 참고하세요.
+
 ### 의존성 설치
 
 ```bash
@@ -150,7 +152,7 @@ Content-Type: multipart/form-data
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `image` | file | 촬영 이미지 |
-| `confidence` | float | 감지 임계값 (기본 0.35) |
+| `confidence` | float | 감지 임계값 (기본 0.6) |
 | `polygon` | string | 감시 영역 JSON (선택) |
 
 응답 예시:

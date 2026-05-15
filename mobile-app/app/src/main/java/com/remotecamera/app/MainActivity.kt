@@ -708,11 +708,15 @@ class MainActivity : AppCompatActivity() {
     private fun formatServerClaudeInspection(json: JSONObject?): String? {
         if (json == null) return null
         if (json.optBoolean("skipped", false)) {
+            val reason = json.optString("reason", "")
+            if (reason == "disabled") {
+                return "Claude 서버 검사 꺼짐: 서버를 ANTHROPIC_API_KEY와 함께 다시 시작하세요."
+            }
             val seconds = json.optDouble("next_available_in_seconds", -1.0)
             return if (seconds >= 0.0) {
                 "Claude 서버 검사 대기: ${seconds.toInt()}초 후 재시도"
             } else {
-                "Claude 서버 검사 대기 중"
+                json.optString("message", "Claude 서버 검사 대기 중")
             }
         }
         if (json.optBoolean("error", false)) {

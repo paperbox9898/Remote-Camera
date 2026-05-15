@@ -160,7 +160,11 @@ class ClaudeInspector:
         force: bool = False,
     ) -> Optional[dict[str, Any]]:
         if not self.enabled:
-            return None
+            return {
+                "skipped": True,
+                "reason": "disabled",
+                "message": "Server-side Claude inspection is disabled. Set ANTHROPIC_API_KEY or CLAUDE_API_KEY before starting the server.",
+            }
 
         now = time.time()
         with self._lock:

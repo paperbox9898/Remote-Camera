@@ -1,4 +1,5 @@
 import csv
+import asyncio
 import base64
 import html
 import io
@@ -16,18 +17,27 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from PIL import Image
 
+from human_guard.claude_inspector import ClaudeInspector, ReferenceStore, combine_crop_images
 from human_guard.detection import create_detector, point_in_polygon
 
 UPLOAD_DIR = Path("server_uploads")
 RESULT_DIR = Path("server_results")
+CROP_DIR = Path("server_crops")
+REFERENCE_DIR = Path("inspection_references")
 HISTORY_CSV = Path("server_history.csv")
+CLAUDE_HISTORY_CSV = Path("claude_history.csv")
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULT_DIR.mkdir(exist_ok=True)
+CROP_DIR.mkdir(exist_ok=True)
+REFERENCE_DIR.mkdir(exist_ok=True)
 
 API_KEY = os.getenv("HUMAN_GUARD_API_KEY", "")
+CLAUDE_INTERVAL_SECONDS = float(os.getenv("CLAUDE_INSPECTION_INTERVAL_SECONDS", "50"))
 
 detector = create_detector()
+reference_store = ReferenceStore(REFERENCE_DIR)
+claude_inspector = ClaudeInspector(interval_seconds=CLAUDE_INTERVAL_SECONDS)
 
 app = FastAPI(title="Human Guard Server")
 
@@ -198,6 +208,86 @@ def _draw_result(img_np: np.ndarray, detections: List[dict], polygon: Optional[s
     return result_img
 
 
+def _crop_alarm_detections(img_np: np.ndarray, detections: List[dict], ts: str, uid: str) -> List[dict]:
+    height, width = img_np.shape[:2]
+    crops = []
+    for index, det in enumerate(detections):
+        if not det.get("in_area", False):
+            continue
+        x1, y1, x2, y2 = [int(v) for v in det["box"]]
+        pad_x = max(8, int((x2 - x1) * 0.12))
+        pad_y = max(8, int((y2 - y1) * 0.12))
+        left = max(0, x1 - pad_x)
+        top = max(0, y1 - pad_y)
+        right = min(width - 1, x2 + pad_x)
+        bottom = min(height - 1, y2 + pad_y)
+        if right <= left or bottom <= top:
+            continue
+
+        crop_img = img_np[top:bottom, left:right]
+        crop_path = CROP_DIR / f"crop_{ts}_{uid}_{index}.jpg"
+        Image.fromarray(crop_img).save(str(crop_path), "JPEG", quality=90)
+        buffer = io.BytesIO()
+        Image.fromarray(crop_img).save(buffer, "JPEG", quality=90)
+        crops.append(
+            {
+                "path": str(crop_path),
+                "box": [left, top, right, bottom],
+                "jpeg": buffer.getvalue(),
+            }
+        )
+    return crops
+
+
+def _record_claude_history(ts: str, uid: str, crop_paths: List[str], result: dict) -> None:
+    status = result.get("status", "ERROR" if result.get("error") else "UNKNOWN")
+    severity = result.get("severity", "")
+    summary = result.get("summary") or result.get("message") or result.get("reason") or ""
+    with open(CLAUDE_HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([ts, uid, status, severity, summary, "|".join(crop_paths)])
+
+
+async def _maybe_run_claude_inspection(
+    *,
+    img_np: np.ndarray,
+    detections: List[dict],
+    result: dict,
+    ts: str,
+    uid: str,
+    source: str,
+    force: bool = False,
+) -> None:
+    if not result.get("alarm"):
+        return
+
+    crops = _crop_alarm_detections(img_np, detections, ts, uid)
+    result["crop_images"] = [crop["path"] for crop in crops]
+    if not crops:
+        return
+
+    try:
+        inspection_image = combine_crop_images(crop["jpeg"] for crop in crops)
+    except Exception:
+        inspection_image = crops[0]["jpeg"]
+
+    reference_text = reference_store.combined_reference_text()
+    reference_images = reference_store.image_references()
+    claude_result = await asyncio.to_thread(
+        claude_inspector.inspect_if_due,
+        image_jpeg=inspection_image,
+        source=source,
+        yolo_status=result.get("status", "UNKNOWN"),
+        detection_count=len(detections),
+        crop_count=len(crops),
+        reference_text=reference_text,
+        reference_images=reference_images,
+        force=force,
+    )
+    if claude_result is not None:
+        result["claude_inspection"] = claude_result
+        _record_claude_history(ts, uid, [crop["path"] for crop in crops], claude_result)
+
+
 def _read_history(limit: int = 100) -> List[dict]:
     if not HISTORY_CSV.exists():
         return []
@@ -224,6 +314,15 @@ def _file_url(path: str, key: Optional[str]) -> str:
     return f"/files/{html.escape(path, quote=True)}{suffix}"
 
 
+def _claude_status() -> dict:
+    return {
+        "enabled": claude_inspector.enabled,
+        "model": claude_inspector.model,
+        "interval_seconds": CLAUDE_INTERVAL_SECONDS,
+        "reference_documents": len(reference_store.list_documents()),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(key: Optional[str] = Query(default=None)):
     _check_api_key(key)
@@ -246,6 +345,13 @@ def dashboard(key: Optional[str] = Query(default=None)):
             "</tr>"
         )
     rows_html = "\n".join(body_rows) or "<tr><td colspan='6'>No inspections yet.</td></tr>"
+    claude_status = _claude_status()
+    claude_text = (
+        f"Claude enabled, interval {claude_status['interval_seconds']}s, "
+        f"references {claude_status['reference_documents']}"
+        if claude_status["enabled"]
+        else "Claude disabled: set ANTHROPIC_API_KEY or CLAUDE_API_KEY"
+    )
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -271,8 +377,9 @@ def dashboard(key: Optional[str] = Query(default=None)):
     <div>
       <h1>Human Guard Dashboard</h1>
       <div class="hint">Auto-refresh every 10 seconds. Latest inspections first.</div>
+      <div class="hint">{html.escape(claude_text)}</div>
     </div>
-    <div><a href="/health{key_suffix}">health</a></div>
+    <div><a href="/health{key_suffix}">health</a> · <a href="/references{key_suffix}">references</a></div>
   </header>
   <table>
     <thead>
@@ -295,7 +402,7 @@ def dashboard(key: Optional[str] = Query(default=None)):
 def serve_file(file_path: str, key: Optional[str] = Query(default=None)):
     _check_api_key(key)
     target = Path(file_path).resolve()
-    allowed_roots = [UPLOAD_DIR.resolve(), RESULT_DIR.resolve()]
+    allowed_roots = [UPLOAD_DIR.resolve(), RESULT_DIR.resolve(), CROP_DIR.resolve(), REFERENCE_DIR.resolve()]
     if not any(target.is_relative_to(root) for root in allowed_roots):
         raise HTTPException(status_code=404, detail="File not found")
     if not target.exists() or not target.is_file():
@@ -306,7 +413,35 @@ def serve_file(file_path: str, key: Optional[str] = Query(default=None)):
 @app.get("/health")
 def health(x_api_key: Optional[str] = Header(default=None), key: Optional[str] = Query(default=None)):
     _check_api_key(x_api_key or key)
-    return {"ok": True, "detector": detector.name}
+    return {"ok": True, "detector": detector.name, "claude": _claude_status()}
+
+
+@app.get("/references")
+def list_references(x_api_key: Optional[str] = Header(default=None), key: Optional[str] = Query(default=None)):
+    _check_api_key(x_api_key or key)
+    return {
+        "documents": [
+            {
+                "name": doc.name,
+                "path": doc.path,
+                "size": doc.size,
+                "kind": doc.kind,
+                "text_preview": doc.text_preview,
+            }
+            for doc in reference_store.list_documents()
+        ]
+    }
+
+
+@app.post("/references")
+async def upload_reference(
+    document: UploadFile = File(...),
+    x_api_key: Optional[str] = Header(default=None),
+):
+    _check_api_key(x_api_key)
+    data = await document.read()
+    path = reference_store.save_upload(document.filename or "reference.txt", data)
+    return {"ok": True, "path": str(path), "name": path.name, "size": path.stat().st_size}
 
 
 @app.websocket("/stream")
@@ -330,6 +465,17 @@ async def stream(
             result = _inspect_array(img_np, confidence=confidence, polygon=polygon)
             result["frame_width"] = int(img_np.shape[1])
             result["frame_height"] = int(img_np.shape[0])
+            if result.get("alarm"):
+                uid = uuid.uuid4().hex[:12]
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                await _maybe_run_claude_inspection(
+                    img_np=img_np,
+                    detections=result["detections"],
+                    result=result,
+                    ts=ts,
+                    uid=uid,
+                    source="stream",
+                )
 
             if overlay:
                 result_img = _draw_result(img_np, result["detections"], polygon=polygon)
@@ -350,6 +496,7 @@ async def inspect(
     image: UploadFile = File(...),
     confidence: float = Form(default=0.6),
     polygon: Optional[str] = Form(default=None),
+    claude_force: bool = Form(default=False),
     x_api_key: Optional[str] = Header(default=None),
 ):
     _check_api_key(x_api_key)
@@ -366,6 +513,15 @@ async def inspect(
 
     result = _inspect_array(img_np, confidence=confidence, polygon=polygon)
     det_list = result["detections"]
+    await _maybe_run_claude_inspection(
+        img_np=img_np,
+        detections=det_list,
+        result=result,
+        ts=ts,
+        uid=uid,
+        source="inspect",
+        force=claude_force,
+    )
     result_img = _draw_result(img_np, det_list, polygon=polygon)
 
     result_path = RESULT_DIR / f"result_{ts}_{uid}.jpg"

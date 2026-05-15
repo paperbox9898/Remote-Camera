@@ -20,6 +20,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -46,6 +47,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -65,9 +67,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var etServerUrl: EditText
     private lateinit var etApiKey: EditText
+    private lateinit var etClaudeApiKey: EditText
     private lateinit var btnCapture: Button
     private lateinit var btnLive: Button
     private lateinit var btnClearArea: Button
+    private lateinit var btnUploadReference: Button
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: DetectionOverlayView
     private lateinit var tvResult: TextView
@@ -84,12 +88,17 @@ class MainActivity : AppCompatActivity() {
     private var lastFpsUpdatedAt = 0L
     private var framesSinceFpsUpdate = 0
     private var liveFps = 0
+    @Volatile
+    private var lastSentLiveFrameJpeg: ByteArray? = null
+    private var lastClaudeInspectionAt = 0L
+    private var claudeInspectionInFlight = false
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .pingInterval(15, TimeUnit.SECONDS)
         .build()
+    private val claudeInspector by lazy { ClaudeInspector(client) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,9 +106,11 @@ class MainActivity : AppCompatActivity() {
 
         etServerUrl = findViewById(R.id.etServerUrl)
         etApiKey = findViewById(R.id.etApiKey)
+        etClaudeApiKey = findViewById(R.id.etClaudeApiKey)
         btnCapture = findViewById(R.id.btnCapture)
         btnLive = findViewById(R.id.btnLive)
         btnClearArea = findViewById(R.id.btnClearArea)
+        btnUploadReference = findViewById(R.id.btnUploadReference)
         previewView = findViewById(R.id.previewView)
         overlayView = findViewById(R.id.overlayView)
         tvResult = findViewById(R.id.tvResult)
@@ -110,6 +121,7 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         etServerUrl.setText(prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL))
         etApiKey.setText(prefs.getString(KEY_API_KEY, ""))
+        etClaudeApiKey.setText(prefs.getString(KEY_CLAUDE_API_KEY, BuildConfig.CLAUDE_API_KEY))
 
         btnCapture.setOnClickListener {
             if (hasCameraPermission()) launchCamera() else requestCameraPermission(startLiveAfterGrant = false)
@@ -132,6 +144,10 @@ class MainActivity : AppCompatActivity() {
                 stopLiveMode()
                 startLiveMode()
             }
+        }
+
+        btnUploadReference.setOnClickListener {
+            openReferencePicker()
         }
 
         overlayView.onAreaChanged = {
@@ -193,6 +209,8 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_CAPTURE && resultCode == RESULT_OK) {
             photoFile?.let { uploadImage(it) }
+        } else if (requestCode == REQ_REFERENCE_PICK && resultCode == RESULT_OK) {
+            data?.data?.let { uploadReference(it) }
         }
     }
 
@@ -292,6 +310,12 @@ class MainActivity : AppCompatActivity() {
                             android.R.color.holo_red_dark,
                             "실시간 FPS: ${liveFps} / 감지 인원: ${count}명",
                         )
+                        maybeRunClaudeInspection(
+                            jpegBytes = lastSentLiveFrameJpeg,
+                            detectionCount = count,
+                            source = "실시간 감시",
+                            yoloStatus = status,
+                        )
                     } else {
                         showResult(
                             "정상",
@@ -325,7 +349,11 @@ class MainActivity : AppCompatActivity() {
             if (now - lastFrameSentAt < LIVE_FRAME_INTERVAL_MS) return
             lastFrameSentAt = now
             val jpeg = imageProxyToJpegBytes(imageProxy, LIVE_JPEG_QUALITY)
-            awaitingStreamResponse = webSocket?.send(jpeg.toByteString()) == true
+            val sent = webSocket?.send(jpeg.toByteString()) == true
+            if (sent) {
+                lastSentLiveFrameJpeg = jpeg
+            }
+            awaitingStreamResponse = sent
         } catch (_: Exception) {
             awaitingStreamResponse = false
         } finally {
@@ -407,6 +435,104 @@ class MainActivity : AppCompatActivity() {
         return nv21
     }
 
+    private fun openReferencePicker() {
+        val serverUrl = normalizedServerUrl()
+        if (serverUrl.isEmpty()) {
+            showResult("서버 URL 필요", android.R.color.darker_gray, "서버 URL을 먼저 입력하세요.")
+            return
+        }
+        saveSettings(serverUrl, etApiKey.text.toString())
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf(
+                    "text/plain",
+                    "text/markdown",
+                    "text/csv",
+                    "application/json",
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp",
+                ),
+            )
+        }
+        startActivityForResult(intent, REQ_REFERENCE_PICK)
+    }
+
+    private fun uploadReference(uri: Uri) {
+        val serverUrl = normalizedServerUrl()
+        val apiKey = etApiKey.text.toString()
+        val name = displayName(uri)
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+
+        btnUploadReference.isEnabled = false
+        showResult("참조 업로드 중", android.R.color.darker_gray, name)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("파일을 읽을 수 없습니다.")
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart(
+                        "document",
+                        name,
+                        bytes.toRequestBody(mimeType.toMediaType()),
+                    )
+                    .build()
+
+                val reqBuilder = Request.Builder()
+                    .url("$serverUrl/references")
+                    .post(requestBody)
+
+                if (apiKey.isNotEmpty()) {
+                    reqBuilder.addHeader("X-API-Key", apiKey)
+                }
+
+                client.newCall(reqBuilder.build()).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    withContext(Dispatchers.Main) {
+                        btnUploadReference.isEnabled = true
+                        when {
+                            response.isSuccessful -> {
+                                val json = JSONObject(body)
+                                showResult(
+                                    "참조 업로드 완료",
+                                    android.R.color.holo_green_dark,
+                                    json.optString("name", name),
+                                )
+                            }
+                            response.code == 401 ->
+                                showResult("인증 실패", android.R.color.holo_orange_dark, "API Key를 확인하세요.")
+                            else ->
+                                showResult("참조 업로드 실패: ${response.code}", android.R.color.holo_orange_dark, body.take(160))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    btnUploadReference.isEnabled = true
+                    showResult("참조 업로드 실패", android.R.color.holo_orange_dark, e.message ?: "파일 또는 서버 연결을 확인하세요.")
+                }
+            }
+        }
+    }
+
+    private fun displayName(uri: Uri): String {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && nameIndex >= 0) {
+                val name = cursor.getString(nameIndex)
+                if (!name.isNullOrBlank()) return name
+            }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "reference"
+    }
+
     private fun uploadImage(file: File) {
         val serverUrl = normalizedServerUrl()
         val apiKey = etApiKey.text.toString()
@@ -455,6 +581,12 @@ class MainActivity : AppCompatActivity() {
                             if (alarm || status == "NG") {
                                 vibrateAlarm()
                                 showResult("불량/위험 감지", android.R.color.holo_red_dark, "감지 인원: ${count}명")
+                                maybeRunClaudeInspection(
+                                    jpegBytes = runCatching { file.readBytes() }.getOrNull(),
+                                    detectionCount = count,
+                                    source = "사진 판정",
+                                    yoloStatus = status,
+                                )
                             } else {
                                 showResult("정상", android.R.color.holo_green_dark, "감지 인원: ${count}명")
                             }
@@ -512,13 +644,74 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeRunClaudeInspection(
+        jpegBytes: ByteArray?,
+        detectionCount: Int,
+        source: String,
+        yoloStatus: String,
+    ) {
+        val apiKey = etClaudeApiKey.text.toString().trim()
+        if (jpegBytes == null || apiKey.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        if (claudeInspectionInFlight || now - lastClaudeInspectionAt < CLAUDE_INSPECTION_COOLDOWN_MS) {
+            return
+        }
+
+        lastClaudeInspectionAt = now
+        claudeInspectionInFlight = true
+        saveSettings(normalizedServerUrl(), etApiKey.text.toString(), apiKey)
+        appendDetailLine("Claude 분석 중...")
+
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val result = claudeInspector.inspect(
+                    jpegBytes = jpegBytes,
+                    apiKey = apiKey,
+                    context = ClaudeInspectionContext(
+                        source = source,
+                        yoloStatus = yoloStatus,
+                        detectionCount = detectionCount,
+                        areaConfigured = overlayView.areaPointCount >= 3,
+                    ),
+                )
+                appendDetailLine(formatClaudeResult(result))
+            } catch (e: Exception) {
+                appendDetailLine("Claude 분석 실패: ${(e.message ?: "알 수 없는 오류").take(120)}")
+            } finally {
+                claudeInspectionInFlight = false
+            }
+        }
+    }
+
+    private fun formatClaudeResult(result: ClaudeInspectionResult): String {
+        val prefix = "Claude ${result.status}/${result.severity}"
+        val recommendation = result.recommendations.firstOrNull()
+        val falsePositive = if (result.falsePositiveLikely) " / 오탐 가능성 있음" else ""
+        return if (recommendation.isNullOrBlank()) {
+            "$prefix: ${result.summary.take(160)}$falsePositive"
+        } else {
+            "$prefix: ${result.summary.take(140)} / 조치: ${recommendation.take(80)}$falsePositive"
+        }
+    }
+
+    private fun appendDetailLine(line: String) {
+        val current = tvDetail.text?.toString().orEmpty()
+        tvDetail.text = if (current.isBlank()) line else "$current\n$line"
+    }
+
     private fun normalizedServerUrl() = etServerUrl.text.toString().trim().trimEnd('/')
 
-    private fun saveSettings(serverUrl: String, apiKey: String) {
+    private fun saveSettings(
+        serverUrl: String,
+        apiKey: String,
+        claudeApiKey: String = etClaudeApiKey.text.toString(),
+    ) {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .edit()
             .putString(KEY_SERVER_URL, serverUrl)
             .putString(KEY_API_KEY, apiKey)
+            .putString(KEY_CLAUDE_API_KEY, claudeApiKey)
             .apply()
     }
 
@@ -595,14 +788,17 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val REQ_PERMISSION = 1001
         private const val REQ_CAPTURE = 1002
+        private const val REQ_REFERENCE_PICK = 1003
         private const val PREFS_NAME = "remote_camera_settings"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_API_KEY = "api_key"
+        private const val KEY_CLAUDE_API_KEY = "claude_api_key"
         private const val DEFAULT_SERVER_URL = "https://chamin.taile54870.ts.net"
         private const val LIVE_FRAME_INTERVAL_MS = 500L
         private const val LIVE_JPEG_QUALITY = 65
         private const val LIVE_CONFIDENCE = 0.6
         private const val FPS_UPDATE_INTERVAL_MS = 1000L
+        private const val CLAUDE_INSPECTION_COOLDOWN_MS = 60_000L
     }
 }
 

@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 server_uploads/
 server_results/
+server_crops/
+inspection_references/
 alarms/
 *.csv
 .gradle/

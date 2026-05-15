@@ -68,6 +68,25 @@
             android:inputType="textPassword"
             android:layout_marginBottom="16dp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Claude API Key"
+            android:textColor="#D1D5DB"
+            android:textSize="14sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/etClaudeApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="sk-ant-..."
+            android:textColor="#F9FAFB"
+            android:textColorHint="#6B7280"
+            android:singleLine="true"
+            android:inputType="textPassword"
+            android:layout_marginBottom="16dp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -105,6 +124,17 @@
             android:textSize="15sp"
             android:textColor="#F9FAFB"
             android:backgroundTint="#4B5563"
+            android:layout_marginBottom="8dp"
+            android:enabled="true" />
+
+        <Button
+            android:id="@+id/btnUploadReference"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="검사 기준/참조 이미지 업로드"
+            android:textSize="15sp"
+            android:textColor="#F9FAFB"
+            android:backgroundTint="#0F766E"
             android:layout_marginBottom="16dp"
             android:enabled="true" />
 

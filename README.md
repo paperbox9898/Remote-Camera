@@ -98,6 +98,18 @@ Tailscale을 쓸 수 없는 경우 Cloudflare Tunnel 또는 localhost.run을 임
 
 앱은 서버 URL과 API Key를 기기에 저장하므로 다음 실행 때 다시 입력하지 않아도 됩니다.
 
+### Claude 검사 사용
+
+앱의 **Claude API Key** 칸에 Anthropic API Key를 입력하면 YOLO가 사람을 감지한 NG 상황에서 현재 이미지를 Claude로 전송해 위험 상황 설명과 조치 요약을 받습니다.
+실시간 감시 중에는 Claude 호출이 과도하게 반복되지 않도록 60초에 한 번만 실행됩니다.
+
+빌드 시 기본 Claude Key를 넣고 싶다면 아래처럼 Gradle 속성 또는 환경변수를 사용할 수 있습니다.
+
+```bash
+cd mobile-app
+CLAUDE_API_KEY="sk-ant-..." CLAUDE_MODEL="claude-3-5-sonnet-latest" gradle assembleDebug
+```
+
 ---
 
 ## 4. GitHub Actions로 APK 받는 방법

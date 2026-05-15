@@ -3,6 +3,13 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def stringBuildConfigValue = { value ->
+    def escaped = String.valueOf(value).replace('\\', '\\\\').replace('"', '\\"')
+    "\"${escaped}\""
+}
+def claudeApiKey = project.findProperty("CLAUDE_API_KEY") ?: System.getenv("CLAUDE_API_KEY") ?: ""
+def claudeModel = project.findProperty("CLAUDE_MODEL") ?: System.getenv("CLAUDE_MODEL") ?: "claude-3-5-sonnet-latest"
+
 android {
     namespace 'com.remotecamera.app'
     compileSdk 34
@@ -13,6 +20,12 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+        buildConfigField "String", "CLAUDE_API_KEY", stringBuildConfigValue(claudeApiKey)
+        buildConfigField "String", "CLAUDE_MODEL", stringBuildConfigValue(claudeModel)
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {

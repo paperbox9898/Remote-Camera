@@ -709,9 +709,12 @@ class MainActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.Main).launch {
             try {
+                val payload = withContext(Dispatchers.Default) {
+                    prepareClaudeImagePayload(jpegBytes, imageMimeType)
+                }
                 val result = claudeInspector.inspect(
-                    jpegBytes = jpegBytes,
-                    imageMimeType = imageMimeType,
+                    jpegBytes = payload.bytes,
+                    imageMimeType = payload.mimeType,
                     apiKey = apiKey,
                     context = ClaudeInspectionContext(
                         source = source,
@@ -728,6 +731,53 @@ class MainActivity : AppCompatActivity() {
                 claudeInspectionInFlight = false
             }
         }
+    }
+
+    private fun prepareClaudeImagePayload(imageBytes: ByteArray, imageMimeType: String): ClaudeImagePayload {
+        if (isWithinClaudeImageBase64Limit(imageBytes.size)) {
+            return ClaudeImagePayload(imageBytes, imageMimeType)
+        }
+
+        val original = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ?: throw ClaudeInspectionException("Claude 이미지가 5MB 제한을 초과했고 축소할 수 없습니다.")
+
+        val qualities = intArrayOf(85, 75, 65, 55, 45, 35)
+        var maxDimension = 1600
+        var bestBytes: ByteArray? = null
+
+        while (maxDimension >= 640) {
+            val scale = minOf(1f, maxDimension.toFloat() / maxOf(original.width, original.height).toFloat())
+            val width = maxOf(1, (original.width * scale).toInt())
+            val height = maxOf(1, (original.height * scale).toInt())
+            val bitmap = if (width == original.width && height == original.height) {
+                original
+            } else {
+                android.graphics.Bitmap.createScaledBitmap(original, width, height, true)
+            }
+
+            for (quality in qualities) {
+                val out = ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out)
+                val compressed = out.toByteArray()
+                bestBytes = compressed
+                if (isWithinClaudeImageBase64Limit(compressed.size)) {
+                    if (bitmap !== original) bitmap.recycle()
+                    original.recycle()
+                    return ClaudeImagePayload(compressed, "image/jpeg")
+                }
+            }
+
+            if (bitmap !== original) bitmap.recycle()
+            maxDimension = (maxDimension * 0.75f).toInt()
+        }
+
+        original.recycle()
+        val fallback = bestBytes
+            ?: throw ClaudeInspectionException("Claude 이미지가 5MB 제한을 초과했고 축소할 수 없습니다.")
+        if (!isWithinClaudeImageBase64Limit(fallback.size)) {
+            throw ClaudeInspectionException("Claude 이미지가 5MB 제한을 초과했습니다. 더 작은 이미지를 선택하세요.")
+        }
+        return ClaudeImagePayload(fallback, "image/jpeg")
     }
 
     private fun offerClaudeInspection(

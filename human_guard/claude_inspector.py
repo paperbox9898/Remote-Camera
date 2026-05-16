@@ -18,7 +18,7 @@ from xml.etree import ElementTree
 
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-DEFAULT_CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+DEFAULT_CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 DEFAULT_MAX_REFERENCE_CHARS = 12000
 REFERENCE_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 

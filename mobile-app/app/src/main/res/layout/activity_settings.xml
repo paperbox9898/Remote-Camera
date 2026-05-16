@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0F172A"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="설정"
+            android:textColor="#F8FAFC"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 연결과 Claude 검사 옵션"
+            android:textColor="#CBD5E1"
+            android:textSize="13sp"
+            android:layout_marginBottom="18dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버"
+            android:textColor="#F8FAFC"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 URL"
+            android:textColor="#CBD5E1"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/etServerUrl"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="http://10.0.2.2:8000"
+            android:textColor="#F8FAFC"
+            android:textColorHint="#64748B"
+            android:singleLine="true"
+            android:inputType="textUri"
+            android:backgroundTint="#475569"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 API Key"
+            android:textColor="#CBD5E1"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/etApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="(비어 있으면 인증 없음)"
+            android:textColor="#F8FAFC"
+            android:textColorHint="#64748B"
+            android:singleLine="true"
+            android:inputType="textPassword"
+            android:backgroundTint="#475569"
+            android:layout_marginBottom="22dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Claude"
+            android:textColor="#F8FAFC"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Claude API Key"
+            android:textColor="#CBD5E1"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/etClaudeApiKey"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="sk-ant-..."
+            android:textColor="#F8FAFC"
+            android:textColorHint="#64748B"
+            android:singleLine="true"
+            android:inputType="textPassword"
+            android:backgroundTint="#475569"
+            android:layout_marginBottom="10dp" />
+
+        <CheckBox
+            android:id="@+id/cbClaudePrompt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="YOLO 감지 시 Claude 검사 문의"
+            android:textColor="#CBD5E1"
+            android:buttonTint="#60A5FA"
+            android:layout_marginBottom="18dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="검사 프롬프트"
+            android:textColor="#CBD5E1"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/etClaudePrompt"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:gravity="top"
+            android:hint="비워두면 기본 안전 검사 프롬프트를 사용합니다."
+            android:textColor="#F8FAFC"
+            android:textColorHint="#64748B"
+            android:inputType="textMultiLine|textCapSentences"
+            android:backgroundTint="#475569"
+            android:layout_marginBottom="20dp" />
+
+        <Button
+            android:id="@+id/btnSaveSettings"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="저장"
+            android:textSize="15sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#2563EB" />
+
+    </LinearLayout>
+</ScrollView>

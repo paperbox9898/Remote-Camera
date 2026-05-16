@@ -4,7 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#111827"
+    android:background="#0F172A"
     android:fillViewport="true">
 
     <LinearLayout
@@ -13,79 +13,69 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Human Guard"
-            android:textColor="#F9FAFB"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="실시간 감시와 서버 판정"
-            android:textColor="#9CA3AF"
-            android:textSize="14sp"
-            android:layout_marginBottom="18dp" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="서버 URL"
-            android:textColor="#D1D5DB"
-            android:textSize="14sp"
-            android:layout_marginBottom="4dp" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Human Guard"
+                    android:textColor="#F8FAFC"
+                    android:textSize="26sp"
+                    android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/etServerUrl"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="https://chamin.taile54870.ts.net"
-            android:textColor="#F9FAFB"
-            android:textColorHint="#6B7280"
-            android:singleLine="true"
-            android:inputType="textUri"
-            android:layout_marginBottom="12dp" />
+                <TextView
+                    android:id="@+id/tvSettingsSummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="설정을 확인하세요"
+                    android:textColor="#CBD5E1"
+                    android:textSize="13sp"
+                    android:layout_marginTop="4dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="API Key"
-            android:textColor="#D1D5DB"
-            android:textSize="14sp"
-            android:layout_marginBottom="4dp" />
+            </LinearLayout>
 
-        <EditText
-            android:id="@+id/etApiKey"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="(비어 있으면 인증 없음)"
-            android:textColor="#F9FAFB"
-            android:textColorHint="#6B7280"
-            android:singleLine="true"
-            android:inputType="textPassword"
-            android:layout_marginBottom="16dp" />
+            <Button
+                android:id="@+id/btnSettings"
+                android:layout_width="92dp"
+                android:layout_height="44dp"
+                android:text="설정"
+                android:textSize="14sp"
+                android:textColor="#F8FAFC"
+                android:backgroundTint="#334155" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Claude API Key"
-            android:textColor="#D1D5DB"
-            android:textSize="14sp"
-            android:layout_marginBottom="4dp" />
+        </LinearLayout>
 
-        <EditText
-            android:id="@+id/etClaudeApiKey"
+        <FrameLayout
+            android:id="@+id/previewContainer"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="sk-ant-..."
-            android:textColor="#F9FAFB"
-            android:textColorHint="#6B7280"
-            android:singleLine="true"
-            android:inputType="textPassword"
-            android:layout_marginBottom="16dp" />
+            android:layout_height="360dp"
+            android:layout_marginBottom="14dp"
+            android:background="#020617">
+
+            <androidx.camera.view.PreviewView
+                android:id="@+id/previewView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#020617"
+                app:scaleType="fitCenter" />
+
+            <com.remotecamera.app.DetectionOverlayView
+                android:id="@+id/overlayView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -96,7 +86,7 @@
             <Button
                 android:id="@+id/btnLive"
                 android:layout_width="0dp"
-                android:layout_height="52dp"
+                android:layout_height="54dp"
                 android:layout_weight="1"
                 android:text="실시간 시작"
                 android:textSize="15sp"
@@ -106,87 +96,85 @@
             <Button
                 android:id="@+id/btnCapture"
                 android:layout_width="0dp"
-                android:layout_height="52dp"
+                android:layout_height="54dp"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="사진 판정"
+                android:text="이미지 판정"
                 android:textSize="15sp"
                 android:textColor="#FFFFFF"
-                android:backgroundTint="#374151" />
+                android:backgroundTint="#475569" />
 
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btnClearArea"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="영역 초기화"
-            android:textSize="15sp"
-            android:textColor="#F9FAFB"
-            android:backgroundTint="#4B5563"
-            android:layout_marginBottom="8dp"
-            android:enabled="true" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
 
-        <Button
-            android:id="@+id/btnUploadReference"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="검사 기준/참조 이미지 업로드"
-            android:textSize="15sp"
-            android:textColor="#F9FAFB"
-            android:backgroundTint="#0F766E"
-            android:layout_marginBottom="16dp"
-            android:enabled="true" />
+            <Button
+                android:id="@+id/btnClearArea"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="영역 초기화"
+                android:textSize="13sp"
+                android:textColor="#E2E8F0"
+                android:backgroundTint="#334155" />
 
-        <FrameLayout
-            android:id="@+id/previewContainer"
-            android:layout_width="match_parent"
-            android:layout_height="420dp"
-            android:layout_marginBottom="16dp">
+            <Button
+                android:id="@+id/btnUploadReference"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="검사 기준"
+                android:textSize="13sp"
+                android:textColor="#E2E8F0"
+                android:backgroundTint="#334155" />
 
-            <androidx.camera.view.PreviewView
-                android:id="@+id/previewView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="#111111"
-                app:scaleType="fitCenter" />
+            <Button
+                android:id="@+id/btnResults"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="결과"
+                android:textSize="13sp"
+                android:textColor="#E2E8F0"
+                android:backgroundTint="#334155" />
 
-            <com.remotecamera.app.DetectionOverlayView
-                android:id="@+id/overlayView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
-
-        </FrameLayout>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvResult"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="결과가 여기에 표시됩니다"
-            android:textColor="#F9FAFB"
-            android:textSize="26sp"
+            android:text="대기 중"
+            android:textColor="#F8FAFC"
+            android:textSize="24sp"
             android:textStyle="bold"
             android:gravity="center"
-            android:paddingTop="14dp"
-            android:paddingBottom="6dp" />
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp" />
 
         <TextView
             android:id="@+id/tvDetail"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="프리뷰를 터치해 감시 영역을 지정하세요"
-            android:textColor="#D1D5DB"
+            android:textColor="#CBD5E1"
             android:textSize="14sp"
             android:gravity="center"
-            android:paddingBottom="12dp" />
+            android:paddingBottom="10dp" />
 
         <ImageView
             android:id="@+id/ivResultImage"
             android:layout_width="match_parent"
             android:layout_height="220dp"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="8dp"
             android:adjustViewBounds="true"
-            android:background="#1F2937"
+            android:background="#1E293B"
             android:contentDescription="판정 결과 이미지"
             android:scaleType="fitCenter" />
 

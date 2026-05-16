@@ -1,13 +1,13 @@
-# YOLOv8n TFLite Model
+# YOLO Model Files
 
-이 디렉터리에 `yolov8n_float32.tflite` 파일을 배치하세요.
+Place local detection model files here.
 
-## 모델 생성 방법
+Supported examples:
 
-```bash
-pip install ultralytics
-python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='tflite')"
-# 생성된 yolov8n_float32.tflite 를 이 디렉터리로 복사
-```
+- `yolo11s.pt`
+- `yolo11n.pt`
+- `yolov8n_float32.tflite`
 
-모델 파일이 없으면 서버는 자동으로 **OpenCV HOG Fallback** 모드로 실행됩니다.
+Model weights are local runtime assets and should not be committed unless explicitly requested.
+
+If no YOLO/TFLite model can be loaded, the server falls back to OpenCV HOG detection.

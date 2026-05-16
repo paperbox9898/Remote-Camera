@@ -1,5 +1,9 @@
 venv/
 .venv/
+.codex-server-venv/
+.vs/
+build-artifacts/
+server_run*.log
 __pycache__/
 *.pyc
 server_uploads/
@@ -10,6 +14,8 @@ alarms/
 *.csv
 .gradle/
 build/
+mobile-app/.idea/
+mobile-app/.gradle/
 mobile-app/app/build/
 *.egg-info/
 dist/

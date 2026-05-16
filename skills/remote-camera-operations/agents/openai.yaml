@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote Camera Operations"
+  short_description: "Run, build, release, and evolve the Remote Camera repo."
+  default_prompt: "Use this skill to operate the Remote Camera server, build or release APKs through GitHub Actions, change Android image/live inspection behavior, or manage app-only Claude inspection."

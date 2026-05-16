@@ -5,6 +5,45 @@
 
 ---
 
+## 0. Codex 작업 지침
+
+### `remote-camera-operations` skill 사용
+
+아래 요청을 처리할 때는 반드시 `skills/remote-camera-operations/SKILL.md`를 먼저 읽고,
+필요한 reference만 추가로 읽어 작업합니다.
+
+- 서버 실행, 재시작, 헬스체크, 대시보드 확인
+- Tailscale Serve 또는 Cloudflare Tunnel 연결
+- GitHub Actions로 Android APK 빌드
+- GitHub Actions run 상태 확인, 실패 확인, artifact 다운로드
+- APK 빌드/서버 구동 절차 문서화
+- Android 앱의 이미지 판정, 실시간 감시, Claude 검사 설정 변경
+- Claude 검사를 서버가 아닌 앱에서만 실행하도록 유지하는 작업
+- 이 저장소의 운영, 배포, 빌드, 서버 접속 문제 해결
+
+상세 절차는 다음 reference를 사용합니다.
+
+- 서버 운영: `skills/remote-camera-operations/references/server-run.md`
+- GitHub APK 빌드: `skills/remote-camera-operations/references/github-apk-build.md`
+- Android 앱/Claude 흐름: `skills/remote-camera-operations/references/android-app-workflow.md`
+
+### 커밋 제외 대상
+
+아래 로컬 산출물은 사용자가 명시하지 않으면 커밋하지 않습니다.
+
+- `.vs/`
+- `venv/`
+- `build-artifacts/`
+- `server_uploads/`
+- `server_results/`
+- `server_history.csv`
+- `alarm_history.csv`
+- `alarms/`
+- `yolo_model/*.pt`
+- `yolo_model/*.tflite`
+
+---
+
 ## 1. 프로젝트 구조
 
 ```
@@ -100,7 +139,7 @@ Content-Type: multipart/form-data
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
 | `image` | file | ✅ | 촬영 이미지 (JPEG/PNG) |
-| `confidence` | float | ❌ | 감지 임계값 (기본: 0.35) |
+| `confidence` | float | ❌ | 감지 임계값 (기본: 0.6) |
 | `polygon` | string | ❌ | 감시 영역 JSON `[[x,y],[x,y],...]` |
 
 응답:
@@ -158,7 +197,7 @@ curl http://localhost:8000/health
 ```bash
 curl -X POST http://localhost:8000/inspect \
   -F "image=@test.jpg" \
-  -F "confidence=0.35"
+  -F "confidence=0.6"
 ```
 
 ### API Key 있을 때

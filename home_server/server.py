@@ -1,5 +1,4 @@
 import csv
-import asyncio
 import base64
 import html
 import io
@@ -17,7 +16,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from PIL import Image
 
-from human_guard.claude_inspector import ClaudeInspector, ReferenceStore, combine_crop_images
+from human_guard.claude_inspector import ReferenceStore
 from human_guard.detection import create_detector, point_in_polygon
 
 UPLOAD_DIR = Path("server_uploads")
@@ -33,11 +32,10 @@ CROP_DIR.mkdir(exist_ok=True)
 REFERENCE_DIR.mkdir(exist_ok=True)
 
 API_KEY = os.getenv("HUMAN_GUARD_API_KEY", "")
-CLAUDE_INTERVAL_SECONDS = float(os.getenv("CLAUDE_INSPECTION_INTERVAL_SECONDS", "50"))
+SERVER_CLAUDE_MODE = "app-only"
 
 detector = create_detector()
 reference_store = ReferenceStore(REFERENCE_DIR)
-claude_inspector = ClaudeInspector(interval_seconds=CLAUDE_INTERVAL_SECONDS)
 
 app = FastAPI(title="Human Guard Server")
 
@@ -257,35 +255,7 @@ async def _maybe_run_claude_inspection(
     source: str,
     force: bool = False,
 ) -> None:
-    if not result.get("alarm"):
-        return
-
-    crops = _crop_alarm_detections(img_np, detections, ts, uid)
-    result["crop_images"] = [crop["path"] for crop in crops]
-    if not crops:
-        return
-
-    try:
-        inspection_image = combine_crop_images(crop["jpeg"] for crop in crops)
-    except Exception:
-        inspection_image = crops[0]["jpeg"]
-
-    reference_text = reference_store.combined_reference_text()
-    reference_images = reference_store.image_references()
-    claude_result = await asyncio.to_thread(
-        claude_inspector.inspect_if_due,
-        image_jpeg=inspection_image,
-        source=source,
-        yolo_status=result.get("status", "UNKNOWN"),
-        detection_count=len(detections),
-        crop_count=len(crops),
-        reference_text=reference_text,
-        reference_images=reference_images,
-        force=force,
-    )
-    if claude_result is not None:
-        result["claude_inspection"] = claude_result
-        _record_claude_history(ts, uid, [crop["path"] for crop in crops], claude_result)
+    return
 
 
 def _read_history(limit: int = 100) -> List[dict]:
@@ -309,6 +279,68 @@ def _read_history(limit: int = 100) -> List[dict]:
     return list(reversed(rows[-limit:]))
 
 
+def _read_claude_history(limit: int = 300) -> List[dict]:
+    if not CLAUDE_HISTORY_CSV.exists():
+        return []
+
+    rows = []
+    with open(CLAUDE_HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if len(row) < 6 or row[0] == "time":
+                continue
+            rows.append(
+                {
+                    "time": row[0],
+                    "uid": row[1],
+                    "status": row[2],
+                    "severity": row[3],
+                    "summary": row[4],
+                    "crop_images": [path for path in row[5].split("|") if path],
+                }
+            )
+    return list(reversed(rows[-limit:]))
+
+
+def _read_history_items(limit: int = 100) -> List[dict]:
+    claude_rows = _read_claude_history(limit=300)
+    claude_by_uid = {row["uid"]: row for row in claude_rows}
+    known_uids = set()
+    items = []
+
+    for row in _read_history(limit=limit):
+        uid = row["uid"]
+        known_uids.add(uid)
+        item = {
+            "source": "inspect",
+            "time": row["time"],
+            "uid": uid,
+            "status": row["status"],
+            "count": row["count"],
+            "upload_image": row["upload"],
+            "result_image": row["result"],
+        }
+        if uid in claude_by_uid:
+            item["claude_inspection"] = claude_by_uid[uid]
+        items.append(item)
+
+    for row in claude_rows:
+        if row["uid"] in known_uids:
+            continue
+        item = {
+            "source": "claude",
+            "time": row["time"],
+            "uid": row["uid"],
+            "status": row["status"],
+            "count": "",
+            "upload_image": "",
+            "result_image": row["crop_images"][0] if row["crop_images"] else "",
+            "claude_inspection": row,
+        }
+        items.append(item)
+
+    return sorted(items, key=lambda item: item["time"], reverse=True)[:limit]
+
+
 def _file_url(path: str, key: Optional[str]) -> str:
     suffix = f"?key={html.escape(key, quote=True)}" if key else ""
     return f"/files/{html.escape(path, quote=True)}{suffix}"
@@ -316,9 +348,10 @@ def _file_url(path: str, key: Optional[str]) -> str:
 
 def _claude_status() -> dict:
     return {
-        "enabled": claude_inspector.enabled,
-        "model": claude_inspector.model,
-        "interval_seconds": CLAUDE_INTERVAL_SECONDS,
+        "enabled": False,
+        "mode": SERVER_CLAUDE_MODE,
+        "model": None,
+        "interval_seconds": None,
         "reference_documents": len(reference_store.list_documents()),
     }
 
@@ -347,10 +380,10 @@ def dashboard(key: Optional[str] = Query(default=None)):
     rows_html = "\n".join(body_rows) or "<tr><td colspan='6'>No inspections yet.</td></tr>"
     claude_status = _claude_status()
     claude_text = (
-        f"Claude enabled, interval {claude_status['interval_seconds']}s, "
+        f"Claude server mode: {claude_status['mode']}, "
         f"references {claude_status['reference_documents']}"
         if claude_status["enabled"]
-        else "Claude disabled: set ANTHROPIC_API_KEY or CLAUDE_API_KEY"
+        else "Claude app-only: enter Claude API Key in the Android app"
     )
     return f"""<!doctype html>
 <html lang="ko">
@@ -414,6 +447,19 @@ def serve_file(file_path: str, key: Optional[str] = Query(default=None)):
 def health(x_api_key: Optional[str] = Header(default=None), key: Optional[str] = Query(default=None)):
     _check_api_key(x_api_key or key)
     return {"ok": True, "detector": detector.name, "claude": _claude_status()}
+
+
+@app.get("/history")
+def history(
+    limit: int = Query(default=100, ge=1, le=300),
+    x_api_key: Optional[str] = Header(default=None),
+    key: Optional[str] = Query(default=None),
+):
+    _check_api_key(x_api_key or key)
+    return {
+        "items": _read_history_items(limit=limit),
+        "claude": _claude_status(),
+    }
 
 
 @app.get("/references")
